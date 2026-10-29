@@ -4,6 +4,8 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User'); 
 
+const authMiddleware = require('../middleware/authMiddleware');
+
 // 1. REGISTER API ROUTE
 router.post('/register', async (req, res) => {
   try {
@@ -79,31 +81,55 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// 3. DELETE ACCOUNT API ROUTE
-router.delete('/delete-account/:name', async (req, res) => {
+
+ // 3. DELETE ACCOUNT API ROUTE
+router.delete('/delete-account', authMiddleware, async (req, res) => {
   try {
-    const userName = req.params.name;
-    
-    const deletedUser = await User.findOneAndDelete({ name: userName });
-    
-    if (deletedUser && deletedUser.role === 'hospital') {
-      const mongoose = require('mongoose');
-      const Inventory = mongoose.models.Inventory || mongoose.model('Inventory');
-      await Inventory.findOneAndDelete({ hospitalName: userName });
+    const deletedUser = await User.findByIdAndDelete(req.user.userId);
+
+    if (!deletedUser) {
+      return res.status(404).json({
+        message: 'User account not found.'
+      });
     }
-    
-    res.status(200).json({ message: "Account deleted successfully." });
-  } catch (error) { 
-    res.status(500).json({ message: "Server error!" }); 
+
+    if (deletedUser.role === 'hospital') {
+      const mongoose = require('mongoose');
+      const Inventory =
+        mongoose.models.Inventory || mongoose.model('Inventory');
+
+      await Inventory.findOneAndDelete({
+        hospitalName: deletedUser.name
+      });
+    }
+
+    return res.status(200).json({
+      message: 'Account deleted successfully.'
+    });
+  } catch (error) {
+    console.error('Delete Account Error:', error);
+
+    return res.status(500).json({
+      message: 'Server error while deleting account.'
+    });
   }
 });
 
+
 // 4. GET All Donors (For Wall of Fame)
+// Return only basic public information, never private contact or address details.
 router.get('/donors', async (req, res) => {
   try {
-    const donors = await User.find({ role: 'donor' }).select('-password').sort({ createdAt: -1 });
+    const donors = await User.find({ role: 'donor' })
+      .select('name bloodGroup district state lastDonationDate createdAt')
+      .sort({ createdAt: -1 })
+      .lean();
+
     res.status(200).json(donors);
-  } catch (error) { res.status(500).json({ message: "Server error!" }); }
+  } catch (error) {
+    console.error('Fetch Donors Error:', error);
+    res.status(500).json({ message: 'Server error!' });
+  }
 });
 
 // 5. CHANGE PASSWORD ROUTE
